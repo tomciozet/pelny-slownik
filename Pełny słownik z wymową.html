@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <title>Słownik PL-DE / DE-PL z wymową i eksportem</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://unpkg.com/docx@8.3.2/build/index.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 40px; max-width: 600px; }
+    input, select, button { padding: 10px; width: 100%; margin: 10px 0; font-size: 16px; }
+    #output { margin-top: 20px; font-size: 18px; }
+  </style>
+</head>
+<body>
+  <h1>Słownik PL-DE / DE-PL z wymową i eksportem</h1>
+
+  <select id="direction">
+    <option value="pl|de">Polski → Niemiecki</option>
+    <option value="de|pl">Niemiecki → Polski</option>
+  </select>
+
+  <input type="text" id="inputWord" placeholder="Wpisz słowo lub zdanie">
+  <button onclick="translate()">Tłumacz</button>
+
+  <div id="output"></div>
+
+  <div id="exportButtons" style="display:none;">
+    <button onclick="exportToPDF()">Eksportuj do PDF</button>
+    <button onclick="exportToWord()">Eksportuj do Worda</button>
+  </div>
+
+  <script>
+    const deepLApiKey = "df298561-00b6-43a7-8401-be00b45cb4a4:fx";
+
+    let lastOriginal = "";
+    let lastTranslated = "";
+    let lastLang = "";
+
+    function correctUmlauts(text) {
+      return text
+        .replace(/ae/g, 'ä')
+        .replace(/oe/g, 'ö')
+        .replace(/ue/g, 'ü')
+        .replace(/ss/g, 'ß');
+    }
+
+    async function translate() {
+      const inputRaw = document.getElementById("inputWord").value.trim();
+      const [sourceLang, targetLang] = document.getElementById("direction").value.split("|");
+      const outputDiv = document.getElementById("output");
+      const exportButtons = document.getElementById("exportButtons");
+
+      if (!inputRaw) {
+        outputDiv.innerHTML = "Wpisz tekst!";
+        exportButtons.style.display = "none";
+        return;
+      }
+
+      const input = correctUmlauts(inputRaw);
+
+      outputDiv.innerHTML = "Tłumaczenie w toku...";
+      exportButtons.style.display = "none";
+
+      try {
+        const deepLResponse = await fetch("https://api-free.deepl.com/v2/translate", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Authorization": `DeepL-Auth-Key ${deepLApiKey}`
+          },
+          body: `text=${encodeURIComponent(input)}&source_lang=${sourceLang.toUpperCase()}&target_lang=${targetLang.toUpperCase()}`
+        });
+
+        if (!deepLResponse.ok) throw new Error("DeepL błąd");
+
+        const deepLData = await deepLResponse.json();
+        const translated = deepLData.translations[0].text;
+        showResult(inputRaw, translated, targetLang);
+        return;
+      } catch (err) {
+        console.warn("DeepL nie zadziałał, próbuję LibreTranslate...", err);
+      }
+
+      try {
+        const libreResponse = await fetch("https://libretranslate.de/translate", {
+          method: "POST",
+          body: JSON.stringify({
+            q: input,
+            source: sourceLang,
+            target: targetLang,
+            format: "text"
+          }),
+          headers: { "Content-Type": "application/json" }
+        });
+
+        const libreData = await libreResponse.json();
+        const translated = libreData.translatedText;
+        showResult(inputRaw, translated, targetLang);
+      } catch (err) {
+        outputDiv.innerHTML = "Błąd: nie udało się przetłumaczyć.";
+        exportButtons.style.display = "none";
+      }
+    }
+
+    function showResult(original, translated, lang) {
+      const outputDiv = document.getElementById("output");
+      const exportButtons = document.getElementById("exportButtons");
+      lastOriginal = original;
+      lastTranslated = translated;
+      lastLang = lang;
+      outputDiv.innerHTML = `
+        <p><strong>Oryginał:</strong> ${original}</p>
+        <p><strong>Tłumaczenie:</strong> ${translated}</p>
+        <button onclick="speak('${translated}', '${lang}')">Odtwórz wymowę</button>
+      `;
+      exportButtons.style.display = "block";
+    }
+
+    function speak(text, langCode) {
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = langCode === "pl" ? "pl-PL" : "de-DE";
+      speechSynthesis.speak(utterance);
+    }
+
+    async function exportToPDF() {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF();
+      doc.setFontSize(14);
+      doc.text(`Oryginał: ${lastOriginal}`, 10, 20);
+      doc.text(`Tł
+::contentReference[oaicite:18]{index=18}
+ 
+      doc.text(`Tłumaczenie: ${lastTranslated}`, 10, 30);
+      doc.save("slownik.pdf");
+    }
+
+    async function exportToWord() {
+      const docx = window.docx;
+      const { Document, Packer, Paragraph, TextRun } = docx;
+
+      const doc = new Document({
+        sections: [{
+          properties: {},
+          children: [
+            new Paragraph({ children: [new TextRun("Oryginał: "), new TextRun({ text: lastOriginal, bold: true })] }),
+            new Paragraph({ children: [new TextRun("Tłumaczenie: "), new TextRun({ text: lastTranslated, bold: true })] })
+          ]
+        }]
+      });
+
+      const blob = await Packer.toBlob(doc);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "slownik.docx";
+      a.click();
+    }
+  </script>
+</body>
+</html>
